@@ -99,6 +99,8 @@ def decode_one_token_ar(
     sampling_kwargs_main["temperature"] = 0.1
     sampling_kwargs_main["top_p"] = 0.1
     sampling_kwargs_main["repetition_penalty"] = 1.0
+    print(sampling_kwargs_main)
+    raise ValueError("Sampling parameters printed; aborting")
 
     codebooks = [
         sample(
