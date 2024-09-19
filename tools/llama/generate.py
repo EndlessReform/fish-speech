@@ -99,6 +99,8 @@ def decode_one_token_ar(
     sampling_kwargs_main["temperature"] = 0.1
     sampling_kwargs_main["top_p"] = 0.1
     sampling_kwargs_main["repetition_penalty"] = 1.0
+    print(sampling_kwargs_main)
+    raise ValueError("foo")
 
     codebooks = [
         sample(
@@ -107,8 +109,12 @@ def decode_one_token_ar(
             **sampling_kwargs_main,
         )[0]
     ]
+    # Force deterministic sampling
+    # codebooks = [torch.argmax(x.logits, dim=-1).to(dtype=torch.int).flatten()]
+    # print(codebooks)
 
     x = x.hidden_states
+    # np.save("slow-out-codebook-0", x.to(torch.float32).cpu().numpy())
 
     # Cleanup the cache
     for layer in model.fast_layers:
@@ -118,15 +124,20 @@ def decode_one_token_ar(
     for codebook_idx in range(model.config.num_codebooks):
         input_pos = torch.tensor([codebook_idx], device=x.device, dtype=torch.long)
         logits = model.forward_generate_fast(x, input_pos)
-        a = sample(
-            logits,
-            previous_tokens=(
-                previous_tokens[codebook_idx + 1]
-                if previous_tokens is not None
-                else None
-            ),
-            **sampling_kwargs,
-        )[0]
+        # np.save(
+        #     f"fast-out-codebook-{codebook_idx + 1}",
+        #     logits.to(torch.float32).cpu().numpy(),
+        # )
+        # a = sample(
+        #     logits,
+        #     previous_tokens=(
+        #         previous_tokens[codebook_idx + 1]
+        #         if previous_tokens is not None
+        #         else None
+        #     ),
+        #     **sampling_kwargs,
+        # )[0]
+        a = torch.argmax(logits, dim=-1).to(dtype=torch.int).flatten()
         x = model.fast_embeddings(a)
         codebooks.append(a)
 
@@ -191,6 +202,7 @@ def decode_n_tokens(
             window = previous_tokens[:, :win_size]
         else:
             window = previous_tokens[:, i - win_size : i]
+        # print(f"Window: {window}")
 
         with (
             torch.backends.cuda.sdp_kernel(
@@ -206,6 +218,7 @@ def decode_n_tokens(
                 previous_tokens=window,
                 **sampling_kwargs,
             )
+            print(f"Token {i}: {next_token.flatten().tolist()}")
 
         input_pos += 1
         cur_token = next_token.view(1, model.config.num_codebooks + 1, -1)
@@ -261,6 +274,7 @@ def generate(
     seq[:, T : T + 1] = next_token
 
     input_pos = torch.tensor([T], device=device, dtype=torch.int)
+    print(f"input pos going into decode_n: {input_pos}")
     x = decode_n_tokens(
         model,
         next_token.view(1, codebook_dim, -1),

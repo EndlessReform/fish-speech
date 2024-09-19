@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
 import torch
 import torch.nn as nn
 from einops import rearrange
@@ -580,14 +581,23 @@ class DualARTransformer(BaseTransformer):
     ) -> Tensor:
         # Fast transformer
         x = x.view(1, 1, -1)
+        # print(f"X shape after transform: {x.shape}")
 
         fast_mask = self.causal_mask[
             None, None, input_pos, : self.config.num_codebooks
         ]  # (B, N, Q, K)
+        # print(f"Fast mask shape: {fast_mask.shape}, input pos: {input_pos}")
+        # print(fast_mask)
+
         fast_freqs_cis = self.freqs_cis[input_pos]
+        # print(
+        #     f"Freqs shape: {fast_freqs_cis.shape}, overall shape: {self.freqs_cis.shape}"
+        # )
 
         for layer in self.fast_layers:
             x = layer(x, fast_freqs_cis, fast_mask, input_pos=input_pos)
+            # np.save("fast_codebook_01_layer_01", x.to(torch.float32).cpu().numpy())
+            # raise ValueError("Aborting on first fast layer")
 
         # unflatten the batch and num_codebooks
         fast_out = self.fast_norm(x)  # only take the last token
@@ -630,7 +640,8 @@ class Attention(nn.Module):
         self.head_dim = config.head_dim
         self.n_local_heads = config.n_local_heads
         self.dim = config.dim
-        self.use_sdpa = use_sdpa
+        # TODO remove this; for debugging purposes
+        self.use_sdpa = False
         self._register_load_state_dict_pre_hook(self.load_hook)
 
     def load_hook(self, state_dict, prefix, *args):
@@ -651,6 +662,7 @@ class Attention(nn.Module):
 
         kv_size = self.n_local_heads * self.head_dim
         q, k, v = self.wqkv(x).split([self.dim, kv_size, kv_size], dim=-1)
+        # print(f"x shape: {x.shape} ")
 
         q = q.view(bsz, seqlen, self.n_head, self.head_dim)
         k = k.view(bsz, seqlen, self.n_local_heads, self.head_dim)
@@ -721,6 +733,7 @@ class Attention(nn.Module):
                 attn_bias += attn_mask
 
         attn_weight = query @ key.transpose(-2, -1) * scale_factor
+        # print(f"attn mask shape: {attn_mask.shape}, ls: {(L, S)}")
         attn_weight += attn_bias
         attn_weight = torch.softmax(attn_weight, dim=-1)
         attn_weight = torch.dropout(attn_weight, dropout_p, train=True)
